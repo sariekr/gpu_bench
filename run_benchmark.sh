@@ -8,7 +8,7 @@ NUM_PROMPTS=100 # Anlamlı bir test için 100 prompt
 GPU_BRAND="nvidia" 
 
 mkdir -p $OUTPUT_DIR
-chmod +x /workspace/scripts/monitor_gpu.sh
+chmod +x ./monitor_gpu.sh
 
 echo "### Starting Benchmark Run ###"
 echo "Model: $MODEL_NAME"
@@ -21,7 +21,7 @@ do
   echo ""
   echo "--- Running for $GPUS GPU(s) ---"
   MONITOR_LOG_FILE="$OUTPUT_DIR/gpu_usage_${GPUS}_gpus.csv"
-  /workspace/scripts/monitor_gpu.sh $MONITOR_LOG_FILE $GPU_BRAND &
+  ./monitor_gpu.sh $MONITOR_LOG_FILE $GPU_BRAND &
   MONITOR_PID=$!
   sleep 2
   
@@ -32,7 +32,8 @@ do
     --dataset-name sharegpt \
     --dataset-path $DATASET_PATH \
     --tensor-parallel-size $GPUS \
-    --num-prompts $NUM_PROMPTS > $RESULT_FILE
+    --num-prompts $NUM_PROMPTS \
+    --gpu-memory-utilization 0.8 > $RESULT_FILE
   
   kill $MONITOR_PID
   echo "--- Benchmark completed for $GPUS GPU(s) ---"
