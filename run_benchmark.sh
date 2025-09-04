@@ -1,35 +1,25 @@
-#!/bin/bash
+#!/bin-bash
 
-# --- YENİ EKLENEN AKILLI BLOK: GPU MARKASINI OTOMATİK ALGILAMA ---
-# Betik, hangi ortamda çalıştığını (NVIDIA veya AMD) kendisi anlar
-# ve doğru izleme aracını (nvidia-smi veya rocm-smi) kullanır.
+# --- GPU BRAND AUTO-DETECTION ---
 if command -v nvidia-smi &> /dev/null; then
     GPU_BRAND="nvidia"
 elif command -v rocm-smi &> /dev/null; then
     GPU_BRAND="amd"
 else
-    echo "HATA: Desteklenen bir GPU sürücüsü bulunamadı (nvidia-smi veya rocm-smi)."
+    echo "ERROR: No supported GPU driver command found."
     exit 1
 fi
-echo "INFO: Algılanan GPU Markası: $GPU_BRAND"
-# --- AKILLI BLOK SONU ---
-
+echo "INFO: Detected GPU Brand: $GPU_BRAND"
 
 # --- AYARLAR ---
-# Test edilecek modelin adı
 MODEL_NAME="openai/gpt-oss-20b"
-# Test edilecek fiziksel GPU sayısı (RunPod'dan seçtiğinizle aynı olmalı)
 GPU_CONFIGS=(1)
-# Stabil sonuçlar için daha yüksek prompt sayısı
 NUM_PROMPTS=1000
-# Güvenli bellek kullanım oranı
-GPU_MEMORY_UTILIZATION=0.75
-# Veri seti yolu
+# GPU Memory Utilization, AMD dökümanında 0.9 olarak önerilmiş.
+GPU_MEMORY_UTILIZATION=0.9
 DATASET_PATH="/workspace/data/ShareGPT_V3_unfiltered_cleaned_split.json"
-# --- BU SATIRI SİLİYORUZ: GPU_BRAND="nvidia" ---
-# Artık bu satıra gerek yok, çünkü marka yukarıda otomatik olarak algılandı.
-# Sonuçların kaydedileceği ana klasör
 OUTPUT_DIR="/workspace/results/benchmark_$(date +%F_%H-%M-%S)_${MODEL_NAME//\//_}"
+
 
 
 # --- BENCHMARK BAŞLANGICI ---
@@ -38,42 +28,54 @@ chmod +x ./monitor_gpu.sh
 
 echo "### Starting Benchmark Run ###"
 echo "Model: $MODEL_NAME"
-echo "GPU Configs: ${GPU_CONFIGS[@]}"
-echo "Num Prompts: $NUM_PROMPTS"
-echo "GPU Memory Utilization: $GPU_MEMORY_UTILIZATION"
-echo "Results will be saved in: $OUTPUT_DIR"
+# ... (diğer echo satırları) ...
 
-# Her bir GPU yapılandırması için testi çalıştır (genellikle tek elemanlı olacak)
 for GPUS in "${GPU_CONFIGS[@]}"
 do
   echo ""
-  echo "--- Running Benchmark for $GPUS GPU(s) ---"
+  echo "--- Running Benchmark for $GPUS GPU(s) on $GPU_BRAND platform ---"
+  
+  # Ortak Hazırlık
   MONITOR_LOG_FILE="$OUTPUT_DIR/gpu_usage_${GPUS}_gpus.csv"
   RAW_RESULT_FILE="$OUTPUT_DIR/throughput_raw_${GPUS}_gpus.txt"
-  SUMMARY_FILE="$OUTPUT_DIR/summary_results_${GPUS}_gpus.txt"
-  JSON_SUMMARY_FILE="$OUTPUT_DIR/summary_results_${GPUS}_gpus.json"
-
-  # GPU izlemeyi başlat
-  # Artık $GPU_BRAND değişkeni, akıllı blok sayesinde doğru değeri ("nvidia" veya "amd") içeriyor.
   ./monitor_gpu.sh "$MONITOR_LOG_FILE" "$GPU_BRAND" &
   MONITOR_PID=$!
   sleep 2
 
-  # vLLM Benchmark'ını çalıştır
-  vllm bench throughput \
-    --model "$MODEL_NAME" \
-    --dataset-name sharegpt \
-    --dataset-path "$DATASET_PATH" \
-    --tensor-parallel-size "$GPUS" \
-    --num-prompts "$NUM_PROMPTS" \
-    --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" > "$RAW_RESULT_FILE"
+  # Platforma Özel Komutları Çalıştır
+  if [ "$GPU_BRAND" = "nvidia" ]; then
+    echo "INFO: Running NVIDIA optimized command..."
+    vllm bench throughput \
+      --model "$MODEL_NAME" \
+      --dataset-name sharegpt \
+      --dataset-path "$DATASET_PATH" \
+      --tensor-parallel-size "$GPUS" \
+      --num-prompts "$NUM_PROMPTS" \
+      --gpu-memory-utilization 0.9 > "$RAW_RESULT_FILE"
+  
+  elif [ "$GPU_BRAND" = "amd" ]; then
+    echo "INFO: Running AMD official optimized command..."
+    # --- AMD İÇİN KRİTİK PERFORMANS AYARLARI ---
+    export VLLM_USE_TRITON_FLASH_ATTN=0
+    export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
+    
+    # Dökümandaki optimize edilmiş komut
+    python3 /app/vllm/benchmarks/benchmark_throughput.py \
+        --model "$MODEL_NAME" \
+        --dataset-name sharegpt \
+        --dataset-path "$DATASET_PATH" \
+        --tensor-parallel-size "$GPUS" \
+        --num-prompts "$NUM_PROMPTS" \
+        --max-num-seqs "$NUM_PROMPTS" \
+        --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+        --dtype float16 \
+        --max-model-len 8192 > "$RAW_RESULT_FILE"
+  fi
 
-  # GPU izlemeyi durdur
   kill $MONITOR_PID
   echo "--- Raw Benchmark completed. Starting post-processing... ---"
 
   # --- SONUÇLARI İŞLEME VE HESAPLAMA ---
-  # Ham sonuç dosyasından verileri çıkar
   RESULT_LINE=$(grep "Throughput:" "$RAW_RESULT_FILE")
   if [ -z "$RESULT_LINE" ]; then
     echo "ERROR: Benchmark failed. Could not find 'Throughput:' line in raw results."
