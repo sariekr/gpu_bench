@@ -10,8 +10,15 @@ if [ "$GPU_TYPE" = "nvidia" ]; then
   done
 else # amd
   while true; do
-    # --showmemused yerine daha uyumlu olan --showmemuse kullanıldı.
-    rocm-smi --showmemuse -d 0 | tail -n 1 | awk '{print strftime("%Y/%m/%d %H:%M:%S.000") ",0," $5/1024}' >> "$OUTPUT_FILE"
+    # --- EN SAĞLAM AMD KOMUTU ---
+    # Sadece VRAM kullanımını alıp, 'M' harfini silip, GB'a çeviriyoruz.
+    TIMESTAMP=$(date '+%Y/%m/%d %H:%M:%S.%3N')
+    MEM_USED_MB=$(rocm-smi -u | grep 'GPU' | awk '{print $5}' | sed 's/M//g')
+    # Eğer MEM_USED_MB boş değilse, hesapla ve yaz.
+    if [ ! -z "$MEM_USED_MB" ]; then
+      MEM_USED_GB=$(echo "scale=3; $MEM_USED_MB / 1024" | bc)
+      echo "$TIMESTAMP,GPU0,$MEM_USED_GB" >> "$OUTPUT_FILE"
+    fi
     sleep 0.1
   done
 fi
