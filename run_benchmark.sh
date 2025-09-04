@@ -28,7 +28,10 @@ chmod +x ./monitor_gpu.sh
 
 echo "### Starting Benchmark Run ###"
 echo "Model: $MODEL_NAME"
-# ... (diğer echo satırları) ...
+echo "GPU Configs: ${GPU_CONFIGS[@]}"
+echo "Num Prompts: $NUM_PROMPTS"
+echo "GPU Memory Utilization (AMD): $GPU_MEMORY_UTILIZATION"
+echo "Results will be saved in: $OUTPUT_DIR"
 
 for GPUS in "${GPU_CONFIGS[@]}"
 do
