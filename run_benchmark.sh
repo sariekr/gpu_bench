@@ -12,7 +12,7 @@ fi
 echo "INFO: Detected GPU Brand: $GPU_BRAND"
 
 # --- AYARLAR ---
-MODEL_NAME="openai/gpt-oss-20b"
+MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
 GPU_CONFIGS=(1)
 NUM_PROMPTS=1000
 # GPU Memory Utilization, AMD dökümanında 0.9 olarak önerilmiş.
