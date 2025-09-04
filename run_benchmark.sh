@@ -12,7 +12,7 @@ fi
 echo "INFO: Detected GPU Brand: $GPU_BRAND"
 
 # --- AYARLAR ---
-MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.3"
+MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
 GPU_CONFIGS=(1)
 NUM_PROMPTS=1000
 # GPU Memory Utilization, AMD dökümanında 0.9 olarak önerilmiş.
