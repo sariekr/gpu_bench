@@ -1,4 +1,4 @@
-#!/bin-bash
+#!/bin/bash
 
 # --- GPU BRAND AUTO-DETECTION ---
 if command -v nvidia-smi &> /dev/null; then
