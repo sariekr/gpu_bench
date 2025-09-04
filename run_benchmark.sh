@@ -12,7 +12,7 @@ fi
 echo "INFO: Detected GPU Brand: $GPU_BRAND"
 
 # --- AYARLAR ---
-MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
+MODEL_NAME="amd/Llama-3.1-8B-Instruct-FP8-KV"
 GPU_CONFIGS=(1)
 NUM_PROMPTS=1000
 # GPU Memory Utilization, AMD dökümanında 0.9 olarak önerilmiş.
@@ -79,50 +79,45 @@ do
   echo "--- Raw Benchmark completed. Starting post-processing... ---"
 
   # --- SONUÇLARI İŞLEME VE HESAPLAMA ---
-  RESULT_LINE=$(grep "Throughput:" "$RAW_RESULT_FILE")
-  if [ -z "$RESULT_LINE" ]; then
-    echo "ERROR: Benchmark failed. Could not find 'Throughput:' line in raw results."
-    cat "$RAW_RESULT_FILE"
-    continue # Döngünün bir sonraki adımına geç
-  fi
+    SUMMARY_FILE="$OUTPUT_DIR/summary_results_${GPUS}_gpus.txt"
+    
+    # Değişkenlerin boş olup olmadığını kontrol et
+    RAW_RESULT_FILE="$OUTPUT_DIR/throughput_raw_${GPUS}_gpus.txt"
+    MONITOR_LOG_FILE="$OUTPUT_DIR/gpu_usage_${GPUS}_gpus.csv"
+    
+    if [ ! -f "$RAW_RESULT_FILE" ]; then
+        echo "ERROR: Raw result file not found!"
+        continue
+    fi
 
-  REQUESTS_PER_SEC=$(echo "$RESULT_LINE" | awk '{print $2}')
-  TOTAL_TOKENS_PER_SEC=$(echo "$RESULT_LINE" | awk '{print $4}')
+    RESULT_LINE=$(grep "Throughput:" "$RAW_RESULT_FILE")
+    if [ -z "$RESULT_LINE" ]; then
+        echo "ERROR: Benchmark failed. Throughput data not found in raw results."
+        cat "$RAW_RESULT_FILE"
+        continue
+    fi
 
-  # 1. Basic Performance Metriklerini Hesapla
-  THROUGHPUT_PER_GPU=$(echo "scale=2; $TOTAL_TOKENS_PER_SEC / $GPUS" | bc -l)
-  AVG_LATENCY_MS=$(echo "scale=2; 1000 / $REQUESTS_PER_SEC" | bc -l)
+    REQUESTS_PER_SEC=$(echo "$RESULT_LINE" | awk '{print $2}')
+    TOTAL_TOKENS_PER_SEC=$(echo "$RESULT_LINE" | awk '{print $4}')
 
-  # 3. Memory Assessment Metriklerini Hesapla
-  PEAK_MEM_PER_GPU_GB=$(tail -n +2 "$MONITOR_LOG_FILE" | awk -F, '{ if ($3 > max) { max = $3 } } END { print max }')
-  PEAK_MEM_TOTAL_GB=$(echo "scale=2; $PEAK_MEM_PER_GPU_GB * $GPUS" | bc -l)
+    # Hesaplamadan önce değişkenlerin dolu olduğundan emin ol
+    THROUGHPUT_PER_GPU="N/A"
+    if [[ ! -z "$TOTAL_TOKENS_PER_SEC" && ! -z "$GPUS" ]]; then
+        THROUGHPUT_PER_GPU=$(echo "scale=2; $TOTAL_TOKENS_PER_SEC / $GPUS" | bc -l)
+    fi
+    
+    AVG_LATENCY_MS="N/A"
+    if [[ ! -z "$REQUESTS_PER_SEC" && "$REQUESTS_PER_SEC" != "0" ]]; then
+        AVG_LATENCY_MS=$(echo "scale=2; 1000 / $REQUESTS_PER_SEC" | bc -l)
+    fi
 
-  MEM_BALANCE_STATS=$(tail -n +2 "$MONITOR_LOG_FILE" | awk -F, '
-    BEGIN { first_timestamp = ""; count = 0; }
-    {
-        if (first_timestamp == "") { first_timestamp = $1; }
-        if ($1 == first_timestamp) {
-            values[count] = $3;
-            sum += $3;
-            sumsq += $3^2;
-            count++;
-        }
-    }
-    END {
-        if (count > 0) {
-            mean = sum / count;
-            stdev = sqrt(sumsq/count - mean^2);
-            if (mean > 0) {
-                balance = (1 - (stdev/mean)) * 100;
-            } else {
-                balance = 0;
-            }
-            printf "%.2f", balance;
-        } else {
-            printf "0.00";
-        }
-    }')
-  if [ "$GPUS" -eq 1 ]; then MEM_BALANCE_STATS="100.00"; fi
+    PEAK_MEM_PER_GPU_GB="N/A"
+    if [ -f "$MONITOR_LOG_FILE" ]; then
+        # wc -l ile dosyanın boş olup olmadığını kontrol et
+        if [ $(wc -l < "$MONITOR_LOG_FILE") -gt 1 ]; then
+             PEAK_MEM_PER_GPU_GB=$(tail -n +2 "$MONITOR_LOG_FILE" | awk -F, '{ if ($3 > max) { max = $3 } } END { if (max > 0) print max; else print "0" }')
+        fi
+    fi
 
   # Okunabilir özet dosyasını oluştur
   {
