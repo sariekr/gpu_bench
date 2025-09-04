@@ -1,4 +1,19 @@
-#!/bin-bash
+#!/bin/bash
+
+# --- YENİ EKLENEN AKILLI BLOK: GPU MARKASINI OTOMATİK ALGILAMA ---
+# Betik, hangi ortamda çalıştığını (NVIDIA veya AMD) kendisi anlar
+# ve doğru izleme aracını (nvidia-smi veya rocm-smi) kullanır.
+if command -v nvidia-smi &> /dev/null; then
+    GPU_BRAND="nvidia"
+elif command -v rocm-smi &> /dev/null; then
+    GPU_BRAND="amd"
+else
+    echo "HATA: Desteklenen bir GPU sürücüsü bulunamadı (nvidia-smi veya rocm-smi)."
+    exit 1
+fi
+echo "INFO: Algılanan GPU Markası: $GPU_BRAND"
+# --- AKILLI BLOK SONU ---
+
 
 # --- AYARLAR ---
 # Test edilecek modelin adı
@@ -11,10 +26,11 @@ NUM_PROMPTS=1000
 GPU_MEMORY_UTILIZATION=0.75
 # Veri seti yolu
 DATASET_PATH="/workspace/data/ShareGPT_V3_unfiltered_cleaned_split.json"
-# GPU markası (NVIDIA için "nvidia", AMD için "amd")
-GPU_BRAND="nvidia"
+# --- BU SATIRI SİLİYORUZ: GPU_BRAND="nvidia" ---
+# Artık bu satıra gerek yok, çünkü marka yukarıda otomatik olarak algılandı.
 # Sonuçların kaydedileceği ana klasör
 OUTPUT_DIR="/workspace/results/benchmark_$(date +%F_%H-%M-%S)_${MODEL_NAME//\//_}"
+
 
 # --- BENCHMARK BAŞLANGICI ---
 mkdir -p "$OUTPUT_DIR"
@@ -38,6 +54,7 @@ do
   JSON_SUMMARY_FILE="$OUTPUT_DIR/summary_results_${GPUS}_gpus.json"
 
   # GPU izlemeyi başlat
+  # Artık $GPU_BRAND değişkeni, akıllı blok sayesinde doğru değeri ("nvidia" veya "amd") içeriyor.
   ./monitor_gpu.sh "$MONITOR_LOG_FILE" "$GPU_BRAND" &
   MONITOR_PID=$!
   sleep 2
