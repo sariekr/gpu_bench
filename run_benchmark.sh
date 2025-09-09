@@ -78,7 +78,9 @@ do
         --max-num-seqs "$NUM_PROMPTS" \
         --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
         --dtype float16 \
-        --max-model-len 8192 > "$RAW_RESULT_FILE"
+        --max-model-len 8192 > "$RAW_RESULT_FILE" \
+        --kv-cache-dtype fp8 > "$RAW_RESULT_FILE" # <-- YENİ EKLENEN OPTİMİZASYON
+
   fi
 
   kill $MONITOR_PID
