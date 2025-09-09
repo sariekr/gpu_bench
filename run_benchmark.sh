@@ -61,6 +61,10 @@ do
     # --- AMD İÇİN KRİTİK PERFORMANS AYARLARI ---
     export VLLM_USE_TRITON_FLASH_ATTN=0
     export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
+	export VLLM_ROCM_USE_AITER=1
+	export VLLM_USE_AITER_UNIFIED_ATTENTION=1
+	export VLLM_ROCM_USE_AITER_MHA=0
+**
     
     # Dökümandaki optimize edilmiş komut
     python3 /app/vllm/benchmarks/benchmark_throughput.py \
