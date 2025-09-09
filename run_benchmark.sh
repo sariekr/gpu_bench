@@ -55,6 +55,8 @@ do
       --tensor-parallel-size "$GPUS" \
       --num-prompts "$NUM_PROMPTS" \
       --gpu-memory-utilization 0.9 > "$RAW_RESULT_FILE"
+      --dtype bfloat16 > "$RAW_RESULT_FILE" # <-- B200 İÇİN KRİTİK DEĞİŞİKLİK
+
   
   elif [ "$GPU_BRAND" = "amd" ]; then
     echo "INFO: Running AMD official optimized command..."
