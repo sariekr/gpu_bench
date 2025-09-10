@@ -59,26 +59,24 @@ do
 
   
   elif [ "$GPU_BRAND" = "amd" ]; then
-    echo "INFO: Running AMD official optimized command..."
+    echo "INFO: Running AMD official optimized command with performance flags..."
     # --- AMD İÇİN KRİTİK PERFORMANS AYARLARI ---
+    export VLLM_USE_TRITON_FLASH_ATTN=0
     export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
-
-**
-    
-    # Dökümandaki optimize edilmiş komut
-    python3 /app/vllm/benchmarks/benchmark_throughput.py \
-        --model "$MODEL_NAME" \
-        --dataset-name sharegpt \
-        --dataset-path "$DATASET_PATH" \
-        --tensor-parallel-size "$GPUS" \
-        --num-prompts "$NUM_PROMPTS" \
-        --max-num-seqs "$NUM_PROMPTS" \
-        --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-        --dtype float16 \
-        --max-model-len 8192 > "$RAW_RESULT_FILE" \
-        --kv-cache-dtype fp8 > "$RAW_RESULT_FILE" # <-- YENİ EKLENEN OPTİMİZASYON
-
-  fi
+  
+  # Dökümandaki optimize edilmiş komut
+  python3 /app/vllm/benchmarks/benchmark_throughput.py \
+      --model "$MODEL_NAME" \
+      --dataset-name sharegpt \
+      --dataset-path "$DATASET_PATH" \
+      --tensor-parallel-size "$GPUS" \
+      --num-prompts "$NUM_PROMPTS" \
+      --max-num-seqs "$NUM_PROMPTS" \
+      --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+      --dtype float16 \
+      --max-model-len 8192 \
+      --max-num-batched-tokens 65536 > "$RAW_RESULT_FILE" # <-- Dökümandan eklenen optimizasyon
+fi
 
   kill $MONITOR_PID
   echo "--- Raw Benchmark completed. Starting post-processing... ---"
