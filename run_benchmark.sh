@@ -14,14 +14,13 @@ echo "INFO: Detected GPU Brand: $GPU_BRAND"
 
 # --- AYARLAR ---
 MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
-GPU_CONFIGS=(1 2 4)  # 8 ekleyebilirsiniz
-NUM_PROMPTS=10000  # 50000'den düşürdük
-GPU_MEMORY_UTILIZATION=0.85  # 0.9'dan düşürdük
+GPU_CONFIGS=(1 2 4)
+NUM_PROMPTS=10000
+GPU_MEMORY_UTILIZATION=0.85
 DATASET_PATH="/workspace/data/ShareGPT_V3_unfiltered_cleaned_split.json"
 OUTPUT_DIR="/workspace/results/benchmark_$(date +%F_%H-%M-%S)_${MODEL_NAME//\//_}"
 
 # --- OPTIMIZASYON PARAMETRELERI ---
-# Her GPU sayısı için optimal max-num-seqs
 declare -A MAX_NUM_SEQS
 MAX_NUM_SEQS[1]=512
 MAX_NUM_SEQS[2]=384
@@ -31,7 +30,6 @@ MAX_NUM_SEQS[8]=128
 # --- ENVIRONMENT OPTIMIZATIONS ---
 export NCCL_P2P_LEVEL=NVL
 export NCCL_P2P_DIRECT=1
-export VLLM_ATTENTION_BACKEND=FLASHINFER
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export RAY_DEDUP_LOGS=0
 
@@ -50,11 +48,9 @@ do
     echo ""
     echo "--- Running Benchmark for $GPUS GPU(s) on $GPU_BRAND platform ---"
     
-    # GPU sayısına göre optimal max-num-seqs
     OPTIMAL_MAX_SEQ=${MAX_NUM_SEQS[$GPUS]}
     echo "Using max-num-seqs: $OPTIMAL_MAX_SEQ for $GPUS GPUs"
     
-    # Monitoring setup
     MONITOR_LOG_FILE="$OUTPUT_DIR/gpu_usage_${GPUS}_gpus.csv"
     RAW_RESULT_FILE="$OUTPUT_DIR/throughput_raw_${GPUS}_gpus.txt"
     
@@ -62,11 +58,10 @@ do
     MONITOR_PID=$!
     sleep 2
     
-    # Platform specific commands
     if [ "$GPU_BRAND" = "nvidia" ]; then
         echo "INFO: Running NVIDIA optimized command..."
         
-        # Warmup run (opsiyonel ama önerilen)
+        # Warmup
         echo "Warming up..."
         vllm bench throughput \
             --model "$MODEL_NAME" \
@@ -91,36 +86,52 @@ do
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
             --enable-chunked-prefill \
             --enable-prefix-caching \
-            --num-scheduler-steps 10 \
             --seed 42 > "$RAW_RESULT_FILE"
-            
-    elif [ "$GPU_BRAND" = "amd" ]; then
-        echo "INFO: Running AMD optimized command..."
-        # AMD specific environment
-        export VLLM_USE_TRITON_FLASH_ATTN=0
-        export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
-        
-        python3 /app/vllm/benchmarks/benchmark_throughput.py \
-            --model "$MODEL_NAME" \
-            --dataset-name sharegpt \
-            --dataset-path "$DATASET_PATH" \
-            --tensor-parallel-size "$GPUS" \
-            --num-prompts "$NUM_PROMPTS" \
-            --max-num-seqs "$OPTIMAL_MAX_SEQ" \
-            --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-            --dtype float16 \
-            --max-model-len 4096 > "$RAW_RESULT_FILE"
     fi
     
-    kill $MONITOR_PID
-    echo "--- Benchmark completed. Processing results... ---"
+    kill $MONITOR_PID 2>/dev/null
     
-    # [Sonuç işleme kısmı aynı kalabilir]
+    # SONUÇ İŞLEME
+    echo "--- Processing results... ---"
     SUMMARY_FILE="$OUTPUT_DIR/summary_results_${GPUS}_gpus.txt"
-    # ... (mevcut processing kodunuz)
+    
+    if [ ! -f "$RAW_RESULT_FILE" ]; then
+        echo "ERROR: Raw result file not found!"
+        continue
+    fi
+    
+    RESULT_LINE=$(grep "Throughput:" "$RAW_RESULT_FILE")
+    if [ -z "$RESULT_LINE" ]; then
+        echo "ERROR: Throughput data not found!"
+        cat "$RAW_RESULT_FILE" | tail -20
+        continue
+    fi
+    
+    REQUESTS_PER_SEC=$(echo "$RESULT_LINE" | awk '{print $2}')
+    TOTAL_TOKENS_PER_SEC=$(echo "$RESULT_LINE" | awk '{print $4}')
+    THROUGHPUT_PER_GPU=$(echo "scale=2; $TOTAL_TOKENS_PER_SEC / $GPUS" | bc -l)
+    AVG_LATENCY_MS=$(echo "scale=2; 1000 / $REQUESTS_PER_SEC" | bc -l)
+    
+    {
+        echo "========== BENCHMARK SUMMARY =========="
+        echo "Date: $(date)"
+        echo "Model: $MODEL_NAME"
+        echo "GPU Count: $GPUS"
+        echo "Max-num-seqs: $OPTIMAL_MAX_SEQ"
+        echo ""
+        echo "--- Performance Metrics ---"
+        echo "Total Throughput: $TOTAL_TOKENS_PER_SEC tokens/s"
+        echo "Per-GPU Throughput: $THROUGHPUT_PER_GPU tokens/s"
+        echo "Requests per Second: $REQUESTS_PER_SEC"
+        echo "Average Latency: $AVG_LATENCY_MS ms"
+        echo "======================================="
+    } > "$SUMMARY_FILE"
+    
+    echo "Summary saved to: $SUMMARY_FILE"
+    cat "$SUMMARY_FILE"
 done
 
-# --- BONUS: 2x2 Configuration Test ---
+# --- 2x2 Configuration Test ---
 if [ ${#GPU_CONFIGS[@]} -gt 0 ] && [ "$GPU_BRAND" = "nvidia" ]; then
     echo ""
     echo "### Testing 2x2 Hybrid Configuration ###"
@@ -151,6 +162,12 @@ if [ ${#GPU_CONFIGS[@]} -gt 0 ] && [ "$GPU_BRAND" = "nvidia" ]; then
     wait $PID1 $PID2
     
     echo "2x2 Hybrid configuration test completed"
+    
+    # Sonuçları göster
+    echo "GPU 0-1 Results:"
+    grep "Throughput:" "$OUTPUT_DIR/hybrid_2x2_gpu01.txt" || echo "No results found"
+    echo "GPU 2-3 Results:"
+    grep "Throughput:" "$OUTPUT_DIR/hybrid_2x2_gpu23.txt" || echo "No results found"
 fi
 
 echo ""
