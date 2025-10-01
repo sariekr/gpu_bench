@@ -1,0 +1,55 @@
+# ==============================================================================
+# Dockerfile for a Self-Contained GPU Benchmarking Environment (AMD / ROCm)
+#
+# Maintainer: Ekrem Sari <ekrem.sari@aimultiple.com>
+# Description: This Dockerfile builds upon the official, community-validated
+#              `rocm/vllm-dev:main` image. It integrates our custom benchmark
+#              scripts and all necessary system tools to create a fully
+#              standardized and reproducible AMD testing environment.
+# ==============================================================================
+
+# Stage 1: Base Image
+# We use the `rocm/vllm-dev:main` image as our foundation. This is the
+# official, regularly updated image from the ROCm/vLLM community, ensuring
+# it contains a stable, pre-built version of vLLM with the latest ROCm
+# performance optimizations and bug fixes. This avoids all manual compilation issues.
+FROM rocm/vllm-dev:main
+
+# Set the maintainer label for image metadata.
+LABEL maintainer="Ekrem Sari <ekrem.sari@aimultiple.com>"
+
+# Stage 2: Environment Configuration
+# Define persistent environment variables for the Hugging Face ecosystem.
+ENV HF_HOME="/workspace/.cache/huggingface"
+ENV TRANSFORMERS_CACHE="/workspace/.cache/huggingface"
+ENV HUGGINGFACE_HUB_CACHE="/workspace/.cache/huggingface"
+
+# Stage 3: System Dependencies Installation
+# Install supplementary tools required by our custom scripts that may be
+# missing from the base image.
+# - 'git': For cloning our benchmark scripts repository.
+# - 'bc': For floating-point arithmetic in the results processing.
+# - 'wget': For downloading the dataset.
+RUN apt-get update && \
+    apt-get install -y git bc wget && \
+    rm -rf /var/lib/apt/lists/*
+
+# Stage 4: Application Code Setup
+# Set the default working directory inside the container to /workspace.
+WORKDIR /workspace
+
+# Clone our custom benchmark scripts from the GitHub repository into the image.
+RUN git clone https://github.com/sariekr/gpu_bench.git
+
+# Grant execute permissions to all shell scripts within the cloned repository.
+RUN chmod +x /workspace/gpu_bench/*.sh
+
+# Stage 5: Initial Dataset Download
+# Download the required ShareGPT dataset during the image build.
+RUN mkdir -p /workspace/data && \
+    wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json -P /workspace/data/
+
+# Stage 6: Default Command
+# The base image already defaults to "/bin/bash", so this is declarative.
+# This provides the user with an interactive shell, giving them full control.
+CMD ["/bin/bash"]

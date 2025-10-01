@@ -1,0 +1,44 @@
+# ==============================================================================
+# Dockerfile for a Nvidia Multi GPU Benchmarking Environment
+#
+# Maintainer: Ekrem Sari <ekrem.sari@aimultiple.com>
+# Description: This Dockerfile builds a standardized, reproducible environment
+#              for running vLLM performance benchmarks. It includes all necessary
+#              dependencies, libraries, custom scripts, and the initial dataset,
+#              ensuring consistent test results across different users and machines.
+# ==============================================================================
+
+# Stage 1: Base Image
+FROM runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
+
+# Set the maintainer label for image metadata.
+LABEL maintainer="Ekrem Sari <ekrem.sari@aimultiple.com>"
+
+# Stage 2: Environment Configuration
+ENV HF_HOME="/workspace/.cache/huggingface"
+ENV TRANSFORMERS_CACHE="/workspace/.cache/huggingface"
+ENV HUGGINGFACE_HUB_CACHE="/workspace/.cache/huggingface"
+
+# Stage 3: System Dependencies Installation
+RUN apt-get update && \
+    apt-get install -y git bc wget && \
+    rm -rf /var/lib/apt/lists/*
+
+# Stage 4: Python Library Installation
+RUN pip install vllm --no-cache-dir
+
+# Stage 5: Application Code Setup
+WORKDIR /workspace
+
+# Clone the benchmark scripts directly from the GitHub repository into the image.
+RUN git clone https://github.com/sariekr/gpu_bench.git
+
+# Grant execute permissions to all shell scripts within the cloned repository.
+RUN chmod +x /workspace/gpu_bench/*.sh
+
+# Stage 6: Initial Dataset Download
+RUN mkdir -p /workspace/data && \
+    wget https://huggingface.co/datasets/anon82314R9123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json -P /workspace/data/
+
+# Stage 7: Default Command
+CMD ["/bin/bash"]
