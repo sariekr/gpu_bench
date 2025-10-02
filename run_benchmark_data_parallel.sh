@@ -24,17 +24,38 @@ echo "INFO: Detected GPU Brand: $GPU_BRAND"
 MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
 GPU_CONFIGS=(1 2 4 8)
 NUM_PROMPTS=10000
-GPU_MEMORY_UTILIZATION=0.85
 DATASET_PATH="/workspace/data/ShareGPT_V3_unfiltered_cleaned_split.json"
-OUTPUT_DIR="/workspace/results/data_parallel_$(date +%F_%H-%M-%S)_${MODEL_NAME//\//_}"
 
-# --- DATA PARALLELISM CONFIGURATION ---
-# Each GPU gets same batch size (no communication overhead)
-MAX_NUM_SEQS=512
+# --- GPU-SPECIFIC MEMORY SETTINGS ---
+if [ "$GPU_BRAND" = "amd" ]; then
+    # AMD MI300X: 192GB HBM3 - ROCm official recommendations
+    GPU_MEMORY_UTILIZATION=0.9
+    MAX_NUM_SEQS=1024
+    MAX_MODEL_LEN=8192
+    MAX_SEQ_LEN_TO_CAPTURE=131072    # ROCm recommended for MI300X
+    MAX_NUM_BATCHED_TOKENS=131072    # ROCm recommended for MI300X
+else
+    # NVIDIA H100/H200/B200: 80GB-192GB HBM3/HBM3e
+    # Based on vLLM best practices and community benchmarks
+    GPU_MEMORY_UTILIZATION=0.85
+    MAX_NUM_SEQS=512
+    MAX_MODEL_LEN=8192              # Increased from 4096 for better context support
+    MAX_SEQ_LEN_TO_CAPTURE=16384    # vLLM recommended for CUDA graphs
+    MAX_NUM_BATCHED_TOKENS=8192     # Optimal for H100 (can go up to 16384)
+fi
+
+OUTPUT_DIR="/workspace/results/data_parallel_$(date +%F_%H-%M-%S)_${MODEL_NAME//\//_}"
 
 # --- ENVIRONMENT OPTIMIZATIONS ---
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export RAY_DEDUP_LOGS=0
+
+# AMD ROCm specific optimizations (safe for NVIDIA too)
+export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1  # Better performance
+export VLLM_ROCM_USE_AITER_RMSNORM=0           # Stability fix
+
+# Uncomment for Mixtral-like MoE models on AMD
+# export VLLM_ROCM_USE_AITER=1
 
 # --- CREATE OUTPUT DIRECTORY ---
 mkdir -p "$OUTPUT_DIR"
@@ -44,9 +65,17 @@ echo "==========================================================================
 echo "DATA PARALLELISM BENCHMARK"
 echo "============================================================================"
 echo "Model: $MODEL_NAME"
+echo "GPU Brand: $GPU_BRAND"
 echo "GPU Configurations: ${GPU_CONFIGS[@]}"
 echo "Prompts per GPU: Variable (total $NUM_PROMPTS split equally)"
+echo ""
+echo "--- Configuration ($GPU_BRAND-optimized) ---"
 echo "Batch Size per GPU: $MAX_NUM_SEQS"
+echo "Max Model Length: $MAX_MODEL_LEN"
+echo "Max Seq Len to Capture: $MAX_SEQ_LEN_TO_CAPTURE"
+echo "Max Batched Tokens: $MAX_NUM_BATCHED_TOKENS"
+echo "GPU Memory Utilization: $GPU_MEMORY_UTILIZATION"
+echo ""
 echo "Output: $OUTPUT_DIR"
 echo ""
 echo "Strategy: Each GPU runs independent vLLM instance"
@@ -80,8 +109,13 @@ do
             --dataset-path "$DATASET_PATH" \
             --num-prompts 100 \
             --max-num-seqs "$MAX_NUM_SEQS" \
-            --max-model-len 4096 \
-            --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" > /dev/null 2>&1
+            --max-model-len "$MAX_MODEL_LEN" \
+            --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
+            --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
+            --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+            --dtype auto \
+            --kv-cache-dtype auto \
+            --trust-remote-code > /dev/null 2>&1
 
         echo "Warmup completed."
         echo ""
@@ -114,10 +148,15 @@ do
                 --dataset-path "$DATASET_PATH" \
                 --num-prompts "$PROMPTS_PER_GPU" \
                 --max-num-seqs "$MAX_NUM_SEQS" \
-                --max-model-len 4096 \
+                --max-model-len "$MAX_MODEL_LEN" \
+                --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
+                --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
                 --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+                --dtype auto \
+                --kv-cache-dtype auto \
                 --enable-chunked-prefill \
                 --enable-prefix-caching \
+                --trust-remote-code \
                 --seed $((42 + gpu_id)) > "$INSTANCE_OUTPUT" 2>&1 &
 
             BENCHMARK_PIDS[$gpu_id]=$!
@@ -135,6 +174,83 @@ do
 
         END_TIME=$(date +%s)
         TOTAL_TIME=$((END_TIME - START_TIME))
+
+    else
+        # AMD ROCm GPUs
+        echo "--- Phase 1: Warmup (AMD ROCm) ---"
+        ROCR_VISIBLE_DEVICES=0 vllm bench throughput \
+            --model "$MODEL_NAME" \
+            --dataset-name sharegpt \
+            --dataset-path "$DATASET_PATH" \
+            --num-prompts 100 \
+            --max-num-seqs "$MAX_NUM_SEQS" \
+            --max-model-len "$MAX_MODEL_LEN" \
+            --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
+            --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
+            --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+            --dtype auto \
+            --kv-cache-dtype auto \
+            --trust-remote-code > /dev/null 2>&1
+
+        echo "Warmup completed."
+        echo ""
+
+        # --- START GPU MONITORING ---
+        echo "--- Phase 2: Starting GPU Monitors (AMD ROCm) ---"
+        declare -a MONITOR_PIDS
+        for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
+            MONITOR_LOG="$OUTPUT_DIR/gpu${gpu_id}_usage_${GPUS}gpus.csv"
+            ROCR_VISIBLE_DEVICES=$gpu_id ./monitor_gpu.sh "$MONITOR_LOG" "$GPU_BRAND" &
+            MONITOR_PIDS[$gpu_id]=$!
+        done
+        sleep 2
+
+        # --- PARALLEL BENCHMARK EXECUTION ---
+        echo "--- Phase 3: Running Parallel Benchmark (AMD ROCm) ---"
+        echo "Starting $GPUS independent vLLM instances..."
+
+        declare -a BENCHMARK_PIDS
+        START_TIME=$(date +%s)
+
+        for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
+            INSTANCE_OUTPUT="$OUTPUT_DIR/instance_gpu${gpu_id}_${GPUS}gpus.txt"
+
+            echo "  → GPU $gpu_id: Processing $PROMPTS_PER_GPU prompts..."
+
+            ROCR_VISIBLE_DEVICES=$gpu_id vllm bench throughput \
+                --model "$MODEL_NAME" \
+                --dataset-name sharegpt \
+                --dataset-path "$DATASET_PATH" \
+                --num-prompts "$PROMPTS_PER_GPU" \
+                --max-num-seqs "$MAX_NUM_SEQS" \
+                --max-model-len "$MAX_MODEL_LEN" \
+                --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
+                --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
+                --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+                --dtype auto \
+                --kv-cache-dtype auto \
+                --enable-chunked-prefill \
+                --enable-prefix-caching \
+                --trust-remote-code \
+                --seed $((42 + gpu_id)) > "$INSTANCE_OUTPUT" 2>&1 &
+
+            BENCHMARK_PIDS[$gpu_id]=$!
+        done
+
+        echo ""
+        echo "All $GPUS instances started. Waiting for completion..."
+        echo "(This simulates production scenario with load balancer)"
+
+        # Wait for all instances
+        for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
+            wait ${BENCHMARK_PIDS[$gpu_id]}
+            echo "  ✓ GPU $gpu_id completed"
+        done
+
+        END_TIME=$(date +%s)
+        TOTAL_TIME=$((END_TIME - START_TIME))
+
+    fi
 
         # Stop monitoring
         for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
