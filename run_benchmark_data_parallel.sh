@@ -249,172 +249,169 @@ do
 
         END_TIME=$(date +%s)
         TOTAL_TIME=$((END_TIME - START_TIME))
-
     fi
 
-        # Stop monitoring
-        for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
-            kill ${MONITOR_PIDS[$gpu_id]} 2>/dev/null
-        done
+    # Stop monitoring
+    for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
+        kill ${MONITOR_PIDS[$gpu_id]} 2>/dev/null
+    done
 
-        echo ""
-        echo "--- Phase 4: Aggregating Results ---"
+    echo ""
+    echo "--- Phase 4: Aggregating Results ---"
 
-        # Collect results from all GPUs
-        TOTAL_THROUGHPUT=0
-        TOTAL_REQUESTS=0
-        declare -a GPU_THROUGHPUTS
-        declare -a GPU_LATENCIES
+    # Collect results from all GPUs
+    TOTAL_THROUGHPUT=0
+    TOTAL_REQUESTS=0
+    declare -a GPU_THROUGHPUTS
+    declare -a GPU_LATENCIES
 
-        for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
-            INSTANCE_OUTPUT="$OUTPUT_DIR/instance_gpu${gpu_id}_${GPUS}gpus.txt"
+    for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
+        INSTANCE_OUTPUT="$OUTPUT_DIR/instance_gpu${gpu_id}_${GPUS}gpus.txt"
 
-            if [ ! -f "$INSTANCE_OUTPUT" ]; then
-                echo "WARNING: GPU $gpu_id output not found!"
-                continue
-            fi
-
-            RESULT_LINE=$(grep "Throughput:" "$INSTANCE_OUTPUT" 2>/dev/null)
-
-            if [ -z "$RESULT_LINE" ]; then
-                echo "WARNING: GPU $gpu_id - No throughput data found"
-                echo "Last 10 lines:"
-                tail -10 "$INSTANCE_OUTPUT"
-                continue
-            fi
-
-            GPU_THROUGHPUT=$(echo "$RESULT_LINE" | awk '{print $4}')
-            GPU_REQUESTS=$(echo "$RESULT_LINE" | awk '{print $2}')
-
-            GPU_THROUGHPUTS[$gpu_id]=$GPU_THROUGHPUT
-            TOTAL_THROUGHPUT=$(echo "$TOTAL_THROUGHPUT + $GPU_THROUGHPUT" | bc -l)
-            TOTAL_REQUESTS=$(echo "$TOTAL_REQUESTS + $GPU_REQUESTS" | bc -l)
-
-            # Calculate per-GPU latency
-            GPU_LATENCY=$(echo "scale=2; 1000 / $GPU_REQUESTS" | bc -l)
-            GPU_LATENCIES[$gpu_id]=$GPU_LATENCY
-
-            echo "GPU $gpu_id: $GPU_THROUGHPUT tokens/s (latency: ${GPU_LATENCY}ms)"
-        done
-
-        # Calculate scaling metrics
-        BASELINE_FILE="$OUTPUT_DIR/instance_gpu0_1gpus.txt"
-        if [ -f "$BASELINE_FILE" ] && [ "$GPUS" -gt 1 ]; then
-            BASELINE_THROUGHPUT=$(grep "Throughput:" "$BASELINE_FILE" | awk '{print $4}')
-            EXPECTED_THROUGHPUT=$(echo "$BASELINE_THROUGHPUT * $GPUS" | bc -l)
-            SPEEDUP=$(echo "scale=2; $TOTAL_THROUGHPUT / $BASELINE_THROUGHPUT" | bc -l)
-            EFFICIENCY=$(echo "scale=2; ($SPEEDUP / $GPUS) * 100" | bc -l)
-        else
-            BASELINE_THROUGHPUT=$TOTAL_THROUGHPUT
-            SPEEDUP="1.00"
-            EFFICIENCY="N/A"
+        if [ ! -f "$INSTANCE_OUTPUT" ]; then
+            echo "WARNING: GPU $gpu_id output not found!"
+            continue
         fi
 
-        AVG_THROUGHPUT_PER_GPU=$(echo "scale=2; $TOTAL_THROUGHPUT / $GPUS" | bc -l)
-        AVG_LATENCY=$(echo "scale=2; 1000 / $TOTAL_REQUESTS" | bc -l)
+        RESULT_LINE=$(grep "Throughput:" "$INSTANCE_OUTPUT" 2>/dev/null)
 
-        # Calculate throughput variance (to check balance)
-        if [ ${#GPU_THROUGHPUTS[@]} -gt 1 ]; then
-            SUM=0
-            for t in "${GPU_THROUGHPUTS[@]}"; do
-                SUM=$(echo "$SUM + $t" | bc -l)
-            done
-            MEAN=$(echo "scale=2; $SUM / ${#GPU_THROUGHPUTS[@]}" | bc -l)
-
-            VARIANCE=0
-            for t in "${GPU_THROUGHPUTS[@]}"; do
-                DIFF=$(echo "$t - $MEAN" | bc -l)
-                SQ=$(echo "$DIFF * $DIFF" | bc -l)
-                VARIANCE=$(echo "$VARIANCE + $SQ" | bc -l)
-            done
-            VARIANCE=$(echo "scale=4; $VARIANCE / ${#GPU_THROUGHPUTS[@]}" | bc -l)
-            STD_DEV=$(echo "scale=2; sqrt($VARIANCE)" | bc -l)
-
-            # Coefficient of variation (CV)
-            CV=$(echo "scale=2; ($STD_DEV / $MEAN) * 100" | bc -l)
-            BALANCE=$(echo "scale=2; 100 - $CV" | bc -l)
-        else
-            BALANCE="100.00"
-            STD_DEV="0.00"
+        if [ -z "$RESULT_LINE" ]; then
+            echo "WARNING: GPU $gpu_id - No throughput data found"
+            echo "Last 10 lines:"
+            tail -10 "$INSTANCE_OUTPUT"
+            continue
         fi
 
-        # Generate summary report
-        SUMMARY_FILE="$OUTPUT_DIR/summary_${GPUS}gpus.txt"
+        GPU_THROUGHPUT=$(echo "$RESULT_LINE" | awk '{print $4}')
+        GPU_REQUESTS=$(echo "$RESULT_LINE" | awk '{print $2}')
 
-        {
-            echo "============================================================================"
-            echo "DATA PARALLELISM BENCHMARK SUMMARY"
-            echo "============================================================================"
-            echo "Date: $(date)"
-            echo "Model: $MODEL_NAME"
-            echo "GPU Count: $GPUS"
-            echo "Strategy: Independent instances (no inter-GPU communication)"
-            echo ""
-            echo "--- Configuration ---"
-            echo "Prompts per GPU: $PROMPTS_PER_GPU"
-            echo "Total Prompts: $NUM_PROMPTS"
-            echo "Batch Size per GPU: $MAX_NUM_SEQS"
-            echo "Total Execution Time: ${TOTAL_TIME}s"
-            echo ""
-            echo "--- Per-GPU Throughput ---"
-            for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
-                if [ ! -z "${GPU_THROUGHPUTS[$gpu_id]}" ]; then
-                    echo "GPU $gpu_id: ${GPU_THROUGHPUTS[$gpu_id]} tokens/s (latency: ${GPU_LATENCIES[$gpu_id]}ms)"
-                fi
-            done
-            echo ""
-            echo "Throughput Balance:"
-            echo "  - Standard Deviation: $STD_DEV tokens/s"
-            echo "  - Balance Score: ${BALANCE}% (100% = perfect balance)"
-            echo ""
-            echo "--- Aggregate Performance Metrics ---"
-            echo "TOTAL THROUGHPUT: $TOTAL_THROUGHPUT tokens/s"
-            echo "Avg Throughput per GPU: $AVG_THROUGHPUT_PER_GPU tokens/s"
-            echo "Total Requests/sec: $TOTAL_REQUESTS req/s"
-            echo "Average Latency: $AVG_LATENCY ms"
-            echo ""
-            if [ "$GPUS" -gt 1 ]; then
-                echo "--- Scaling Analysis ---"
-                echo "Baseline (1 GPU): $BASELINE_THROUGHPUT tokens/s"
-                echo "Speedup: ${SPEEDUP}x"
-                echo "Scaling Efficiency: ${EFFICIENCY}%"
-                echo ""
-                echo "Interpretation:"
-                if (( $(echo "$EFFICIENCY > 95" | bc -l) )); then
-                    echo "  ✓ EXCELLENT: Near-perfect linear scaling!"
-                    echo "  → Data parallelism is optimal for this configuration"
-                elif (( $(echo "$EFFICIENCY > 85" | bc -l) )); then
-                    echo "  ✓ VERY GOOD: Excellent scaling with minimal overhead"
-                    echo "  → Minor variance likely due to system noise"
-                elif (( $(echo "$EFFICIENCY > 75" | bc -l) )); then
-                    echo "  ✓ GOOD: Acceptable scaling"
-                    echo "  → Some overhead present but still efficient"
-                else
-                    echo "  ⚠ MODERATE: Check for bottlenecks"
-                    echo "  → Possible CPU, disk I/O, or memory bandwidth issues"
-                fi
-            fi
-            echo ""
-            echo "--- Comparison with Tensor Parallelism ---"
-            echo "Data Parallelism advantages:"
-            echo "  • No inter-GPU communication overhead"
-            echo "  • Works with any interconnect (PCIe, NVLink, etc.)"
-            echo "  • Near-linear scaling expected (~95-100%)"
-            echo "  • Each GPU fully utilized independently"
-            echo ""
-            echo "Data Parallelism considerations:"
-            echo "  • Requires load balancer in production"
-            echo "  • Slightly higher latency vs tensor parallelism"
-            echo "  • Each GPU loads full model (more total VRAM)"
-            echo "  • Perfect for throughput-focused workloads"
-            echo "============================================================================"
-        } | tee "$SUMMARY_FILE"
+        GPU_THROUGHPUTS[$gpu_id]=$GPU_THROUGHPUT
+        TOTAL_THROUGHPUT=$(echo "$TOTAL_THROUGHPUT + $GPU_THROUGHPUT" | bc -l)
+        TOTAL_REQUESTS=$(echo "$TOTAL_REQUESTS + $GPU_REQUESTS" | bc -l)
 
-        echo ""
-        echo "Summary saved to: $SUMMARY_FILE"
-        echo ""
+        # Calculate per-GPU latency
+        GPU_LATENCY=$(echo "scale=2; 1000 / $GPU_REQUESTS" | bc -l)
+        GPU_LATENCIES[$gpu_id]=$GPU_LATENCY
 
+        echo "GPU $gpu_id: $GPU_THROUGHPUT tokens/s (latency: ${GPU_LATENCY}ms)"
+    done
+
+    # Calculate scaling metrics
+    BASELINE_FILE="$OUTPUT_DIR/instance_gpu0_1gpus.txt"
+    if [ -f "$BASELINE_FILE" ] && [ "$GPUS" -gt 1 ]; then
+        BASELINE_THROUGHPUT=$(grep "Throughput:" "$BASELINE_FILE" | awk '{print $4}')
+        EXPECTED_THROUGHPUT=$(echo "$BASELINE_THROUGHPUT * $GPUS" | bc -l)
+        SPEEDUP=$(echo "scale=2; $TOTAL_THROUGHPUT / $BASELINE_THROUGHPUT" | bc -l)
+        EFFICIENCY=$(echo "scale=2; ($SPEEDUP / $GPUS) * 100" | bc -l)
+    else
+        BASELINE_THROUGHPUT=$TOTAL_THROUGHPUT
+        SPEEDUP="1.00"
+        EFFICIENCY="N/A"
     fi
+
+    AVG_THROUGHPUT_PER_GPU=$(echo "scale=2; $TOTAL_THROUGHPUT / $GPUS" | bc -l)
+    AVG_LATENCY=$(echo "scale=2; 1000 / $TOTAL_REQUESTS" | bc -l)
+
+    # Calculate throughput variance (to check balance)
+    if [ ${#GPU_THROUGHPUTS[@]} -gt 1 ]; then
+        SUM=0
+        for t in "${GPU_THROUGHPUTS[@]}"; do
+            SUM=$(echo "$SUM + $t" | bc -l)
+        done
+        MEAN=$(echo "scale=2; $SUM / ${#GPU_THROUGHPUTS[@]}" | bc -l)
+
+        VARIANCE=0
+        for t in "${GPU_THROUGHPUTS[@]}"; do
+            DIFF=$(echo "$t - $MEAN" | bc -l)
+            SQ=$(echo "$DIFF * $DIFF" | bc -l)
+            VARIANCE=$(echo "$VARIANCE + $SQ" | bc -l)
+        done
+        VARIANCE=$(echo "scale=4; $VARIANCE / ${#GPU_THROUGHPUTS[@]}" | bc -l)
+        STD_DEV=$(echo "scale=2; sqrt($VARIANCE)" | bc -l)
+
+        # Coefficient of variation (CV)
+        CV=$(echo "scale=2; ($STD_DEV / $MEAN) * 100" | bc -l)
+        BALANCE=$(echo "scale=2; 100 - $CV" | bc -l)
+    else
+        BALANCE="100.00"
+        STD_DEV="0.00"
+    fi
+
+    # Generate summary report
+    SUMMARY_FILE="$OUTPUT_DIR/summary_${GPUS}gpus.txt"
+
+    {
+        echo "============================================================================"
+        echo "DATA PARALLELISM BENCHMARK SUMMARY"
+        echo "============================================================================"
+        echo "Date: $(date)"
+        echo "Model: $MODEL_NAME"
+        echo "GPU Count: $GPUS"
+        echo "Strategy: Independent instances (no inter-GPU communication)"
+        echo ""
+        echo "--- Configuration ---"
+        echo "Prompts per GPU: $PROMPTS_PER_GPU"
+        echo "Total Prompts: $NUM_PROMPTS"
+        echo "Batch Size per GPU: $MAX_NUM_SEQS"
+        echo "Total Execution Time: ${TOTAL_TIME}s"
+        echo ""
+        echo "--- Per-GPU Throughput ---"
+        for ((gpu_id=0; gpu_id<$GPUS; gpu_id++)); do
+            if [ ! -z "${GPU_THROUGHPUTS[$gpu_id]}" ]; then
+                echo "GPU $gpu_id: ${GPU_THROUGHPUTS[$gpu_id]} tokens/s (latency: ${GPU_LATENCIES[$gpu_id]}ms)"
+            fi
+        done
+        echo ""
+        echo "Throughput Balance:"
+        echo "  - Standard Deviation: $STD_DEV tokens/s"
+        echo "  - Balance Score: ${BALANCE}% (100% = perfect balance)"
+        echo ""
+        echo "--- Aggregate Performance Metrics ---"
+        echo "TOTAL THROUGHPUT: $TOTAL_THROUGHPUT tokens/s"
+        echo "Avg Throughput per GPU: $AVG_THROUGHPUT_PER_GPU tokens/s"
+        echo "Total Requests/sec: $TOTAL_REQUESTS req/s"
+        echo "Average Latency: $AVG_LATENCY ms"
+        echo ""
+        if [ "$GPUS" -gt 1 ]; then
+            echo "--- Scaling Analysis ---"
+            echo "Baseline (1 GPU): $BASELINE_THROUGHPUT tokens/s"
+            echo "Speedup: ${SPEEDUP}x"
+            echo "Scaling Efficiency: ${EFFICIENCY}%"
+            echo ""
+            echo "Interpretation:"
+            if (( $(echo "$EFFICIENCY > 95" | bc -l) )); then
+                echo "  ✓ EXCELLENT: Near-perfect linear scaling!"
+                echo "  → Data parallelism is optimal for this configuration"
+            elif (( $(echo "$EFFICIENCY > 85" | bc -l) )); then
+                echo "  ✓ VERY GOOD: Excellent scaling with minimal overhead"
+                echo "  → Minor variance likely due to system noise"
+            elif (( $(echo "$EFFICIENCY > 75" | bc -l) )); then
+                echo "  ✓ GOOD: Acceptable scaling"
+                echo "  → Some overhead present but still efficient"
+            else
+                echo "  ⚠ MODERATE: Check for bottlenecks"
+                echo "  → Possible CPU, disk I/O, or memory bandwidth issues"
+            fi
+        fi
+        echo ""
+        echo "--- Comparison with Tensor Parallelism ---"
+        echo "Data Parallelism advantages:"
+        echo "  • No inter-GPU communication overhead"
+        echo "  • Works with any interconnect (PCIe, NVLink, etc.)"
+        echo "  • Near-linear scaling expected (~95-100%)"
+        echo "  • Each GPU fully utilized independently"
+        echo ""
+        echo "Data Parallelism considerations:"
+        echo "  • Requires load balancer in production"
+        echo "  • Slightly higher latency vs tensor parallelism"
+        echo "  • Each GPU loads full model (more total VRAM)"
+        echo "  • Perfect for throughput-focused workloads"
+        echo "============================================================================"
+    } | tee "$SUMMARY_FILE"
+
+    echo ""
+    echo "Summary saved to: $SUMMARY_FILE"
+    echo ""
 done
 
 # --- FINAL COMPARISON REPORT ---
