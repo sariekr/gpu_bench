@@ -73,7 +73,8 @@ if [ "$GPU_BRAND" = "amd" ]; then
     export PYTORCH_TUNABLEOP_ENABLED=1          # Enable PyTorch auto-tuning
     export PYTORCH_TUNABLEOP_TUNING=1           # Enable tuning on first run
     export VLLM_DISABLE_CUDA_GRAPH=1            # Disable slow CUDA graph capture on ROCm
-    echo "INFO: AMD MI300X optimizations enabled (CUDA graphs disabled)"
+    export VLLM_TORCH_COMPILE_LEVEL=0           # Disable torch.compile (slow on ROCm first run)
+    echo "INFO: AMD MI300X optimizations enabled (CUDA graphs + torch.compile disabled)"
 fi
 
 # Uncomment for Mixtral-like MoE models on AMD
