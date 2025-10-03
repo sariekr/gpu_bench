@@ -205,11 +205,10 @@ do
             --num-prompts 10 \
             --max-num-seqs "$MAX_NUM_SEQS" \
             --max-model-len "$MAX_MODEL_LEN" \
-            --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
-            --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
             --dtype auto \
             --kv-cache-dtype auto \
+            --disable-cuda-graph \
             --trust-remote-code
 
         echo "Warmup completed (TunableOp cache generated)."
@@ -244,11 +243,10 @@ do
                 --num-prompts "$PROMPTS_PER_GPU" \
                 --max-num-seqs "$MAX_NUM_SEQS" \
                 --max-model-len "$MAX_MODEL_LEN" \
-                --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
-                --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
                 --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
                 --dtype auto \
                 --kv-cache-dtype auto \
+                --disable-cuda-graph \
                 --enable-chunked-prefill \
                 --enable-prefix-caching \
                 --trust-remote-code \
