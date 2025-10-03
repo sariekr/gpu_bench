@@ -38,12 +38,12 @@ fi
 
 # --- GPU-SPECIFIC MEMORY SETTINGS ---
 if [ "$GPU_BRAND" = "amd" ]; then
-    # AMD MI300X: 192GB HBM3 - ROCm official recommendations
+    # AMD MI300X: 192GB HBM3 - Conservative settings for faster warmup
     GPU_MEMORY_UTILIZATION=0.9
-    MAX_NUM_SEQS=2048               # Increased for 192GB VRAM
+    MAX_NUM_SEQS=1024               # Start conservative, can increase later
     MAX_MODEL_LEN=8192
-    MAX_SEQ_LEN_TO_CAPTURE=16384    # AMD performance optimization guide
-    MAX_NUM_BATCHED_TOKENS=8192     # AMD performance optimization guide
+    MAX_SEQ_LEN_TO_CAPTURE=8192     # Reduced for faster graph compilation
+    MAX_NUM_BATCHED_TOKENS=8192     # Match seq len
 else
     # NVIDIA H100/H200/B200: 80GB-192GB HBM3/HBM3e
     # Based on vLLM best practices and community benchmarks
@@ -196,21 +196,21 @@ do
     else
         # AMD ROCm GPUs - Optimized with performance settings
         echo "--- Phase 1: Warmup (AMD ROCm with optimizations) ---"
+        echo "Warmup output (to identify bottlenecks):"
+        echo ""
         ROCR_VISIBLE_DEVICES=0 vllm bench throughput \
             --model "$MODEL_NAME" \
             --dataset-name sharegpt \
             --dataset-path "$DATASET_PATH" \
-            --num-prompts 100 \
+            --num-prompts 10 \
             --max-num-seqs "$MAX_NUM_SEQS" \
             --max-model-len "$MAX_MODEL_LEN" \
             --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
             --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
-            --num-scheduler-steps 10 \
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-            --dtype float16 \
+            --dtype auto \
             --kv-cache-dtype auto \
-            --enable-chunked-prefill \
-            --trust-remote-code > /dev/null 2>&1
+            --trust-remote-code
 
         echo "Warmup completed (TunableOp cache generated)."
         echo ""
@@ -246,9 +246,8 @@ do
                 --max-model-len "$MAX_MODEL_LEN" \
                 --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
                 --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
-                --num-scheduler-steps 10 \
                 --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-                --dtype float16 \
+                --dtype auto \
                 --kv-cache-dtype auto \
                 --enable-chunked-prefill \
                 --enable-prefix-caching \
