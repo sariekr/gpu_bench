@@ -195,23 +195,21 @@ do
         TOTAL_TIME=$((END_TIME - START_TIME))
 
     else
-        # AMD ROCm GPUs - Optimized with performance settings
-        echo "--- Phase 1: Warmup (AMD ROCm with optimizations) ---"
-        echo "Warmup output (to identify bottlenecks):"
-        echo ""
+        # AMD ROCm GPUs - Simple warmup (no chunked-prefill to avoid torch.compile)
+        echo "--- Phase 1: Warmup (AMD ROCm) ---"
         ROCR_VISIBLE_DEVICES=0 vllm bench throughput \
             --model "$MODEL_NAME" \
             --dataset-name sharegpt \
             --dataset-path "$DATASET_PATH" \
-            --num-prompts 10 \
+            --num-prompts 100 \
             --max-num-seqs "$MAX_NUM_SEQS" \
             --max-model-len "$MAX_MODEL_LEN" \
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
             --dtype auto \
             --kv-cache-dtype auto \
-            --trust-remote-code
+            --trust-remote-code > /dev/null 2>&1
 
-        echo "Warmup completed (TunableOp cache generated)."
+        echo "Warmup completed."
         echo ""
 
         # --- START GPU MONITORING ---
