@@ -38,12 +38,12 @@ fi
 
 # --- GPU-SPECIFIC MEMORY SETTINGS ---
 if [ "$GPU_BRAND" = "amd" ]; then
-    # AMD MI300X: 192GB HBM3 - Conservative settings for faster warmup
-    GPU_MEMORY_UTILIZATION=0.9
-    MAX_NUM_SEQS=1024               # Start conservative, can increase later
+    # AMD MI300X: 192GB HBM3 - Conservative settings
+    GPU_MEMORY_UTILIZATION=0.85     # Reduced to avoid OOM on startup
+    MAX_NUM_SEQS=1024
     MAX_MODEL_LEN=8192
-    MAX_SEQ_LEN_TO_CAPTURE=8192     # Reduced for faster graph compilation
-    MAX_NUM_BATCHED_TOKENS=8192     # Match seq len
+    MAX_SEQ_LEN_TO_CAPTURE=8192
+    MAX_NUM_BATCHED_TOKENS=8192
 else
     # NVIDIA H100/H200/B200: 80GB-192GB HBM3/HBM3e
     # Based on vLLM best practices and community benchmarks
@@ -200,7 +200,7 @@ do
         echo "--- Phase 1: Warmup (AMD ROCm) ---"
         echo "(Showing output to track progress...)"
         echo ""
-        ROCR_VISIBLE_DEVICES=0 VLLM_DISABLE_CUDA_GRAPH=1 VLLM_TORCH_COMPILE_LEVEL=0 vllm bench throughput \
+        ROCR_VISIBLE_DEVICES=0 vllm bench throughput \
             --model "$MODEL_NAME" \
             --dataset-name sharegpt \
             --dataset-path "$DATASET_PATH" \
@@ -210,6 +210,7 @@ do
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
             --dtype auto \
             --kv-cache-dtype auto \
+            --enforce-eager \
             --trust-remote-code
 
         echo ""
@@ -238,7 +239,7 @@ do
 
             echo "  → GPU $gpu_id: Processing $PROMPTS_PER_GPU prompts..."
 
-            ROCR_VISIBLE_DEVICES=$gpu_id VLLM_DISABLE_CUDA_GRAPH=1 VLLM_TORCH_COMPILE_LEVEL=0 vllm bench throughput \
+            ROCR_VISIBLE_DEVICES=$gpu_id vllm bench throughput \
                 --model "$MODEL_NAME" \
                 --dataset-name sharegpt \
                 --dataset-path "$DATASET_PATH" \
@@ -248,6 +249,7 @@ do
                 --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
                 --dtype auto \
                 --kv-cache-dtype auto \
+                --enforce-eager \
                 --enable-chunked-prefill \
                 --enable-prefix-caching \
                 --trust-remote-code \
