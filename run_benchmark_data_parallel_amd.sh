@@ -197,6 +197,8 @@ do
     else
         # AMD ROCm GPUs - Simple warmup (no chunked-prefill to avoid torch.compile)
         echo "--- Phase 1: Warmup (AMD ROCm) ---"
+        echo "(Showing output to track progress...)"
+        echo ""
         ROCR_VISIBLE_DEVICES=0 VLLM_DISABLE_CUDA_GRAPH=1 vllm bench throughput \
             --model "$MODEL_NAME" \
             --dataset-name sharegpt \
@@ -207,8 +209,9 @@ do
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
             --dtype auto \
             --kv-cache-dtype auto \
-            --trust-remote-code > /dev/null 2>&1
+            --trust-remote-code
 
+        echo ""
         echo "Warmup completed."
         echo ""
 
