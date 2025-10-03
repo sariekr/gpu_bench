@@ -72,7 +72,8 @@ if [ "$GPU_BRAND" = "amd" ]; then
     export TORCH_BLAS_PREFER_HIPBLASLT=1        # Use hipBLASLt for better matmul performance
     export PYTORCH_TUNABLEOP_ENABLED=1          # Enable PyTorch auto-tuning
     export PYTORCH_TUNABLEOP_TUNING=1           # Enable tuning on first run
-    echo "INFO: AMD MI300X optimizations enabled"
+    export VLLM_DISABLE_CUDA_GRAPH=1            # Disable slow CUDA graph capture on ROCm
+    echo "INFO: AMD MI300X optimizations enabled (CUDA graphs disabled)"
 fi
 
 # Uncomment for Mixtral-like MoE models on AMD
@@ -208,7 +209,6 @@ do
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
             --dtype auto \
             --kv-cache-dtype auto \
-            --disable-cuda-graph \
             --trust-remote-code
 
         echo "Warmup completed (TunableOp cache generated)."
@@ -246,7 +246,6 @@ do
                 --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
                 --dtype auto \
                 --kv-cache-dtype auto \
-                --disable-cuda-graph \
                 --enable-chunked-prefill \
                 --enable-prefix-caching \
                 --trust-remote-code \
