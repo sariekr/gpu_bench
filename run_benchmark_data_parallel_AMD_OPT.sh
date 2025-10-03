@@ -28,12 +28,12 @@ DATASET_PATH="/workspace/data/ShareGPT_V3_unfiltered_cleaned_split.json"
 
 # --- GPU-SPECIFIC MEMORY SETTINGS ---
 if [ "$GPU_BRAND" = "amd" ]; then
-    # AMD MI300X: 192GB HBM3 - ROCm official recommendations
+    # AMD MI300X: 192GB HBM3 - ROCm official recommendations (Oct 2024)
     GPU_MEMORY_UTILIZATION=0.9
-    MAX_NUM_SEQS=1024
+    MAX_NUM_SEQS=512                # AMD recommends 512 for better perf
     MAX_MODEL_LEN=8192
-    MAX_SEQ_LEN_TO_CAPTURE=16384    # ROCm recommended for MI300X
-    MAX_NUM_BATCHED_TOKENS=16384    # ROCm recommended for MI300X
+    MAX_SEQ_LEN_TO_CAPTURE=16384    # For long context models
+    MAX_NUM_BATCHED_TOKENS=16384    # ROCm recommended
 else
     # NVIDIA H100/H200/B200: 80GB-192GB HBM3/HBM3e
     # Based on vLLM best practices and community benchmarks
@@ -60,9 +60,8 @@ if [ "$GPU_BRAND" = "amd" ]; then
     export HSA_OVERRIDE_CPU_AFFINITY_DEBUG=0    # Proper CPU affinity
     export NCCL_MIN_NCHANNELS=112               # MI300X optimized
     export TORCH_BLAS_PREFER_HIPBLASLT=1        # Better matmul
-    export PYTORCH_TUNABLEOP_ENABLED=1          # Auto-tuning
-    export PYTORCH_TUNABLEOP_TUNING=1           # Enable tuning
-    echo "INFO: AMD MI300X optimizations enabled"
+    export PYTORCH_TUNABLEOP_ENABLED=1          # Use tuned ops (no tuning)
+    echo "INFO: AMD MI300X optimizations enabled (no tuning)"
 fi
 
 # Uncomment for Mixtral-like MoE models on AMD
@@ -238,9 +237,8 @@ do
                 --max-seq-len-to-capture "$MAX_SEQ_LEN_TO_CAPTURE" \
                 --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
                 --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-                --dtype auto \
+                --dtype float16 \
                 --kv-cache-dtype auto \
-                --enable-chunked-prefill \
                 --enable-prefix-caching \
                 --trust-remote-code \
                 --seed $((42 + gpu_id)) > "$INSTANCE_OUTPUT" 2>&1 &
