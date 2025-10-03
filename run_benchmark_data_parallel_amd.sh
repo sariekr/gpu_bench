@@ -200,7 +200,7 @@ do
         echo "--- Phase 1: Warmup (AMD ROCm) ---"
         echo "(Showing output to track progress...)"
         echo ""
-        ROCR_VISIBLE_DEVICES=0 VLLM_DISABLE_CUDA_GRAPH=1 vllm bench throughput \
+        ROCR_VISIBLE_DEVICES=0 VLLM_DISABLE_CUDA_GRAPH=1 VLLM_TORCH_COMPILE_LEVEL=0 vllm bench throughput \
             --model "$MODEL_NAME" \
             --dataset-name sharegpt \
             --dataset-path "$DATASET_PATH" \
@@ -238,7 +238,7 @@ do
 
             echo "  → GPU $gpu_id: Processing $PROMPTS_PER_GPU prompts..."
 
-            ROCR_VISIBLE_DEVICES=$gpu_id VLLM_DISABLE_CUDA_GRAPH=1 vllm bench throughput \
+            ROCR_VISIBLE_DEVICES=$gpu_id VLLM_DISABLE_CUDA_GRAPH=1 VLLM_TORCH_COMPILE_LEVEL=0 vllm bench throughput \
                 --model "$MODEL_NAME" \
                 --dataset-name sharegpt \
                 --dataset-path "$DATASET_PATH" \
